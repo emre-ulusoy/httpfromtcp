@@ -5,42 +5,68 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"os"
+	"net"
 	"strings"
 )
 
-const inputFilePath = "messages.txt"
-
 func main() {
-	f, err := os.Open(inputFilePath)
+	listener, err := net.Listen("tcp", ":42069")
 	if err != nil {
-		log.Fatalf("could not open %s: %s\n", inputFilePath, err)
+		log.Fatalf("could not listen on port 42069: %s\n", err)
 	}
 
-	fmt.Printf("Reading data from %s\n", inputFilePath)
-	fmt.Println("=====================================")
+	defer listener.Close()
 
-	currentLineContents := ""
 	for {
-		buffer := make([]byte, 8, 8)
-		n, err := f.Read(buffer)
+		connection, err := listener.Accept()
 		if err != nil {
-			if currentLineContents != "" {
-				fmt.Printf("read: %s\n", currentLineContents)
+			fmt.Printf("error: %s\n", err.Error())
+			continue
+		}
+
+		fmt.Printf("Connection accepted, address is %s\n", connection.RemoteAddr().String())
+
+		strCh := getLinesChannel(connection)
+		for string := range strCh {
+			fmt.Printf("%v\n", string)
+			fmt.Println(string)
+		}
+	}
+}
+
+func getLinesChannel(conn net.Conn) <-chan string {
+	currentLineContents := ""
+	lineChan := make(chan string)
+
+	go func() {
+		for {
+			buffer := make([]byte, 8, 8)
+			n, err := conn.Read(buffer)
+			if err != nil {
+				if currentLineContents != "" {
+					lineChan <- currentLineContents
+					currentLineContents = ""
+				}
+				if errors.Is(err, io.EOF) {
+					close(lineChan)
+					conn.Close()
+					fmt.Println("connection closed")
+					return
+				}
+				fmt.Printf("error: %s\n", err.Error())
+				close(lineChan)
+				conn.Close()
+				return
+			}
+			str := string(buffer[:n])
+			parts := strings.Split(str, "\n")
+			for i := 0; i < len(parts)-1; i++ {
+				lineChan <- currentLineContents + parts[i]
 				currentLineContents = ""
 			}
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			fmt.Printf("error: %s\n", err.Error())
-			break
+			currentLineContents += parts[len(parts)-1]
 		}
-		str := string(buffer[:n])
-		parts := strings.Split(str, "\n")
-		for i := 0; i < len(parts)-1; i++ {
-			fmt.Printf("read: %s%s\n", currentLineContents, parts[i])
-			currentLineContents = ""
-		}
-		currentLineContents += parts[len(parts)-1]
-	}
+	}()
+
+	return lineChan
 }
