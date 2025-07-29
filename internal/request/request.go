@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 
 	"github.com/emre-ulusoy/httpfromtcp/internal/headers"
@@ -13,8 +14,10 @@ import (
 type Request struct {
 	RequestLine RequestLine
 	Headers     headers.Headers
+	Body        []byte
 
-	state requestState
+	state          requestState
+	bodyLengthRead int
 }
 
 type RequestLine struct {
@@ -28,6 +31,7 @@ type requestState int
 const (
 	requestStateInitialized requestState = iota
 	requestStateParsingHeaders
+	requestStateParsingBody
 	requestStateDone
 )
 
@@ -42,6 +46,7 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 	req := &Request{
 		state:   requestStateInitialized,
 		Headers: headers.NewHeaders(),
+		Body:    make([]byte, 0),
 	}
 	for req.state != requestStateDone {
 		if readToIndex >= len(buf) {
@@ -162,9 +167,36 @@ func (r *Request) parseSingle(data []byte) (int, error) {
 			return 0, err
 		}
 		if done {
-			r.state = requestStateDone
+			r.state = requestStateParsingBody
 		}
 		return n, nil
+	case requestStateParsingBody:
+		valStr, ok := r.Headers.Get("Content-Length")
+		if ok {
+			val, err := strconv.Atoi(valStr)
+			if err != nil {
+				return 0, fmt.Errorf("malformed Content-Length: %s", err)
+			}
+			r.Body = append(r.Body, data...) // instructions say append but is it literal?
+			r.bodyLengthRead += len(data)
+			if r.bodyLengthRead > val {
+				return 0, fmt.Errorf(
+					"Content-Length is greater than the body's actual length. Body length: %d. Body: %s",
+					len(data),
+					data,
+				)
+			} else if r.bodyLengthRead == val {
+				fmt.Println("entire length of data consumed")
+				r.state = requestStateDone
+				return len(data), nil
+			} else {
+				return len(data), nil
+			}
+		} else {
+			fmt.Println("Nothing to parse (body)")
+			r.state = requestStateDone
+			return len(data), nil
+		}
 	case requestStateDone:
 		return 0, fmt.Errorf("error: trying to read data in a done state")
 	default:
