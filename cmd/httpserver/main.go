@@ -1,7 +1,6 @@
 package main
 
 import (
-	"io"
 	"log"
 	"os"
 	"os/signal"
@@ -15,7 +14,7 @@ import (
 const port = 42069
 
 func main() {
-	server, err := server.Serve(handlerFunc, port)
+	server, err := server.Serve(port, handlerFunc)
 	if err != nil {
 		log.Fatalf("Error starting server: %v", err)
 	}
@@ -28,21 +27,70 @@ func main() {
 	log.Println("Server gracefully stopped")
 }
 
-func handlerFunc(writer io.Writer, req *request.Request) *server.HandlerError {
-	handlerErr := &server.HandlerError{}
+func handlerFunc(w *response.Writer, req *request.Request) {
 	targetPath := req.RequestLine.RequestTarget
 	if targetPath == "/yourproblem" {
-		handlerErr.StatusCode = response.StatusCode400
-		handlerErr.Message = "Your problem is not my problem\n"
-		return handlerErr
-
+		request400(w, req)
 	} else if targetPath == "/myproblem" {
-		handlerErr.StatusCode = response.StatusCode500
-		handlerErr.Message = "Woopsie, my bad\n"
-		return handlerErr
-
+		request500(w, req)
 	} else {
-		writer.Write([]byte("All good, frfr\n"))
-		return nil
+		request200(w, req)
 	}
+	return
+}
+
+func request400(w *response.Writer, _ *request.Request) {
+	w.WriteStatusLine(response.StatusCodeBadRequest)
+	body := []byte(`<html>
+  <head>
+    <title>400 Bad Request</title>
+  </head>
+  <body>
+    <h1>Bad Request</h1>
+    <p>Your request honestly kinda sucked.</p>
+  </body>
+</html>`)
+	h := response.GetDefaultHeaders(len(body))
+	h.Override("Content-Type", "text/html")
+	w.WriteHeaders(h)
+	w.WriteBody(body)
+
+	return
+}
+
+func request500(w *response.Writer, _ *request.Request) {
+	w.WriteStatusLine(response.StatusCodeInternalServerError)
+	body := []byte(`<html>
+  <head>
+    <title>500 Internal Server Error</title>
+  </head>
+  <body>
+    <h1>Internal Server Error</h1>
+    <p>Okay, you know what? This one is on me.</p>
+  </body>
+</html>`)
+	h := response.GetDefaultHeaders(len(body))
+	h.Override("Content-type", "text/html")
+	w.WriteHeaders(h)
+	w.WriteBody(body)
+
+	return
+}
+
+func request200(w *response.Writer, _ *request.Request) {
+	body := []byte(`<html>
+  <head>
+    <title>200 OK</title>
+  </head>
+  <body>
+    <h1>Success!</h1>
+    <p>Your request was an absolute banger.</p>
+  </body>
+</html>`)
+	h := response.GetDefaultHeaders(len(body))
+	h.Override("Content-type", "text/html")
+	w.WriteHeaders(h)
+	w.WriteBody(body)
+
+	return
 }
